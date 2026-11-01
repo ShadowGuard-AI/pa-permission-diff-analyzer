@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import difflib
 import logging
 import os
 import stat
@@ -176,30 +175,40 @@ def compare_directories(
 
     diffs: List[Tuple[str, Dict[str, str], Dict[str, str]]] = []
 
-    files1 = {
-        str(f.relative_to(dir1)): f for f in dir1.rglob("*") if f.is_file()
-    }  # Use rglob for recursive listing
-    files2 = {
-        str(f.relative_to(dir2)): f for f in dir2.rglob("*") if f.is_file()
-    }  # Use rglob for recursive listing
+    # The two roots themselves are compared as the "." entry, and every
+    # subdirectory is compared as an entry in its own right, so directory
+    # modes are part of the comparison, not only file modes.
+    if recursive:
+        entries1 = {
+            str(f.relative_to(dir1)): f for f in dir1.rglob("*")
+        }
+        entries2 = {
+            str(f.relative_to(dir2)): f for f in dir2.rglob("*")
+        }
+    else:
+        entries1 = {
+            str(f.relative_to(dir1)): f for f in dir1.glob("*")
+        }
+        entries2 = {
+            str(f.relative_to(dir2)): f for f in dir2.glob("*")
+        }
 
-    all_files = set(files1.keys()).union(files2.keys())
+    all_files = sorted(set(entries1.keys()).union(entries2.keys()))
+    all_files = ["."] + all_files
 
     for filename in all_files:
-        path1 = dir1 / filename
-        path2 = dir2 / filename
+        if filename == ".":
+            path1 = dir1
+            path2 = dir2
+        else:
+            path1 = dir1 / filename
+            path2 = dir2 / filename
 
         perms1 = get_file_permissions(path1, ignore_ownership)
         perms2 = get_file_permissions(path2, ignore_ownership)
 
         if perms1 != perms2:
             diffs.append((filename, perms1, perms2))
-
-        if recursive:
-            if path1.is_dir() and path2.is_dir():
-                diffs.extend(
-                    compare_directories(path1, path2, recursive, ignore_ownership)
-                )
 
     return diffs
 
@@ -251,15 +260,19 @@ def generate_rich_report(
         dir2 (str): The path to the second directory.
 
     Returns:
-        str: A string representing the Rich-formatted output.
+        str: The text form of the report. The rich table is printed to the
+        console as a side effect, and this text form is what a report file
+        receives, so a saved report is never empty.
     """
+
+    text_report = generate_text_report(diffs, dir1, dir2)
 
     if not RICH_INSTALLED:
         print(
             "Rich library not installed.  Falling back to text format. "
             "Install rich with `pip install rich` to enable rich reporting."
         )
-        return generate_text_report(diffs, dir1, dir2)
+        return text_report
 
     custom_theme = Theme(
         {
@@ -285,7 +298,7 @@ def generate_rich_report(
 
     if not diffs:
         console.print("[no_diffs]No permission differences found.[/no_diffs]")
-        return ""
+        return text_report
 
     for filename, perms1, perms2 in diffs:
         table.add_row(
@@ -295,7 +308,7 @@ def generate_rich_report(
         )
 
     console.print(table)
-    return ""
+    return text_report
 
 
 def main() -> None:
@@ -316,6 +329,12 @@ def main() -> None:
     if not dir2.exists():
         logging.error(f"Directory not found: {dir2}")
         sys.exit(1)
+    if not dir1.is_dir():
+        logging.error(f"Not a directory: {dir1}. Both arguments must be directories.")
+        sys.exit(1)
+    if not dir2.is_dir():
+        logging.error(f"Not a directory: {dir2}. Both arguments must be directories.")
+        sys.exit(1)
 
     try:
         diffs = compare_directories(
@@ -335,6 +354,8 @@ def main() -> None:
             except IOError as e:
                 logging.error(f"Error writing to file: {e}")
                 sys.exit(1)
+        elif args.output_format == "rich" and RICH_INSTALLED:
+            pass  # The rich table was already printed by generate_rich_report.
         else:
             print(report)  # Output to stdout if no report file specified
 

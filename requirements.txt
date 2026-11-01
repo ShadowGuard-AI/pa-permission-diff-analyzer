@@ -1,4 +1,3 @@
-```
-# No packages require explicit version constraints.
-# difflib is part of the Python standard library.
-```
+# Only the Python standard library is required.
+# rich is optional: it enables --output-format rich.
+# To install it: pip install rich>=13.0.0
