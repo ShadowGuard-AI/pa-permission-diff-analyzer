@@ -107,12 +107,24 @@ def get_file_permissions(
         Returns an empty dictionary if the file does not exist or is inaccessible.
     """
     try:
+        # os.stat follows symlinks, so a link is compared as its
+        # target and the link's own mode never appears. A broken link
+        # lands in the FileNotFoundError branch below and returns the
+        # same empty dict as a file that is simply absent from one
+        # tree, and PermissionError returns it too: the report cannot
+        # tell missing, broken, and unreadable apart.
         stat_info = os.stat(path)
         mode = stat.filemode(stat_info.st_mode)
         owner = stat_info.st_uid
         group = stat_info.st_gid
 
         if not ignore_ownership:
+            # Read this flag carefully: it only skips the name lookup
+            # below. The returned dict still carries owner and group as
+            # numeric strings, and the comparison in compare_directories
+            # still compares them, so --ignore-ownership does not stop
+            # two trees with different owners from diffing. It only
+            # changes whether names or numbers are printed.
             try:
                 import pwd, grp
 
